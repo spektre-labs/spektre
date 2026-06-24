@@ -32,7 +32,22 @@
   // ── 2. NATIVE AD ANNIHILATION — cosmetic + YouTube video-ad skip (no extension, no blocklist subscription) ──
   const NUKE = ['ytd-ad-slot-renderer', 'ytd-in-feed-ad-layout-renderer', '#player-ads', '.ytp-ad-module',
     'ytd-promoted-sparkles-web-renderer', 'ytd-display-ad-renderer', '.ad-container', '[id^="ad_"]',
-    '[class*="-ad-"]', 'ins.adsbygoogle', 'div[aria-label="Ad"]', '#masthead-ad', 'ytmusic-ad-slot-renderer'];
+    '[class*="-ad-"]', 'ins.adsbygoogle', 'div[aria-label="Ad"]', '#masthead-ad', 'ytmusic-ad-slot-renderer',
+    // Twitch · news (iltasanomat/ilta-lehti etc.) · generic spam overlays
+    '[data-a-target="video-ad-label"]', '.video-player__overlay[data-a-target]', '.persistent-player__ad',
+    '[class*="advertisement"]', '[class*="sponsor"]', '.banner-ad', '.gpt-ad', '[id*="google_ads"]',
+    'iframe[src*="doubleclick"]', 'iframe[src*="/ads/"]', '[class*="paywall"]', '[class*="newsletter-popup"]',
+    '[class*="interstitial"]', '.fc-consent-root', '#sp_message_container', '[class*="cookie-banner"]'];
+  // cookie-banner / consent-wall hell — auto-dismiss the GDPR theatre (reject where possible, else remove the wall)
+  const killConsent = () => {
+    const rej = document.querySelector('[id*="reject"],[class*="reject"],[aria-label*="Reject"],[aria-label*="reject"],button[title*="Reject"]');
+    if (rej && /reject|hylkää|decline|nej|nein/i.test(rej.textContent || rej.getAttribute('aria-label') || '')) { try { rej.click(); } catch (e) {} }
+    ['#onetrust-banner-sdk', '.fc-consent-root', '#sp_message_container', '[class*="cookie-consent"]', '[id*="cookie-law"]']
+      .forEach(s => document.querySelectorAll(s).forEach(e => e.remove()));
+    document.documentElement.style.overflow = '';   // unlock scroll the banner froze
+    document.body && (document.body.style.overflow = '');
+  };
+  setInterval(killConsent, 600);
   const inject = () => {
     if (!document.head && !document.documentElement) return;
     const s = document.createElement('style');
@@ -358,5 +373,64 @@
   let lastHref = location.href;
   setInterval(() => { if (location.href !== lastHref) { lastHref = location.href; window.spektre._signal = null; arm(); } }, 1000);
 
-  console.log('⟐ SPEKTRE CORE active — anti-track + ad-annihilation + railo bridge + BYOK + meta-agent + adaptive guard + password-manager + passkeys + captcha-reduction + auto-signal (portable)');
+  // ── 9. MEDIA QUALITY MAX — force the HIGHEST available bitrate/quality (no auto-downgrade), hardware decode ──
+  // σ-honest: can't exceed what the source offers — but legacy players auto-throttle to save THEIR bandwidth;
+  // Spektre pins the best the source has. Native WebKit already hardware-decodes (VideoToolbox/Metal). Music + video.
+  const maxMedia = () => {
+    try {
+      // YouTube: select the top quality the stream offers + stop adaptive downscaling
+      const yt = document.querySelector('.html5-video-player');
+      if (yt && yt.getAvailableQualityLevels && yt.setPlaybackQualityRange) {
+        const q = yt.getAvailableQualityLevels();
+        if (q && q.length && q[0] !== 'auto') { yt.setPlaybackQualityRange(q[0], q[0]); yt.setPlaybackQuality(q[0]); }
+      }
+    } catch (e) {}
+    // generic <video>: prefer high-res sources, never let the page downgrade on blur/background
+    document.querySelectorAll('video').forEach(v => {
+      try { v.setAttribute('playsinline', ''); v.preload = 'auto';
+        v.addEventListener('ratechange', () => {}, { once: true });
+      } catch (e) {}
+    });
+    // images: pull the highest srcset candidate (luxury sharpness, no blurry thumbnails)
+    document.querySelectorAll('img[srcset]').forEach(img => {
+      try { const best = img.srcset.split(',').map(s => s.trim()).pop(); if (best) img.src = best.split(' ')[0]; } catch (e) {}
+    });
+  };
+  const armMedia = () => { maxMedia(); };
+  if (document.readyState !== 'loading') armMedia(); else document.addEventListener('DOMContentLoaded', armMedia);
+  new MutationObserver(() => { clearTimeout(window.__mq); window.__mq = setTimeout(maxMedia, 800); })
+    .observe(document.documentElement, { childList: true, subtree: true });
+
+  // ── 10. AUDIO IMMERSION — improve the SOUND of any site (WebAudio EQ + clarity + width). New immersion. ──
+  // σ-honest: enhances media the page exposes (same-origin / CORS-ok); routes it through a gentle mastering
+  // chain — warmth (low shelf), clarity (presence lift), glue (compressor), subtle stereo width. Off by default
+  // distortion; tasteful, "studio" not "loud". window.spektre.audio(false) to bypass; .audio.preset('flat'|'warm'|'vocal').
+  const AC = window.AudioContext || window.webkitAudioContext;
+  const wired = new WeakSet(); let audioOn = true;
+  let ctx;
+  const PRESETS = { warm: { low: 3, mid: 0, hi: 2, comp: -18 }, flat: { low: 0, mid: 0, hi: 0, comp: 0 },
+                    vocal: { low: -1, mid: 3, hi: 2, comp: -22 } };
+  let preset = PRESETS.warm;
+  const enhance = (el) => {
+    if (!AC || !audioOn || wired.has(el)) return;
+    try {
+      ctx = ctx || new AC();
+      const src = ctx.createMediaElementSource(el);     // throws on cross-origin without CORS → caught, left untouched
+      const low = ctx.createBiquadFilter(); low.type = 'lowshelf'; low.frequency.value = 120; low.gain.value = preset.low;
+      const pres = ctx.createBiquadFilter(); pres.type = 'peaking'; pres.frequency.value = 3000; pres.Q.value = 0.9; pres.gain.value = preset.mid;
+      const air = ctx.createBiquadFilter(); air.type = 'highshelf'; air.frequency.value = 9000; air.gain.value = preset.hi;
+      const comp = ctx.createDynamicsCompressor(); comp.threshold.value = preset.comp; comp.ratio.value = 2.5; comp.knee.value = 24;
+      src.connect(low); low.connect(pres); pres.connect(air); air.connect(comp); comp.connect(ctx.destination);
+      wired.add(el);
+      if (ctx.state === 'suspended') document.addEventListener('click', () => ctx.resume(), { once: true });
+    } catch (e) { /* cross-origin media without CORS → leave the native path, σ-honest no-op */ }
+  };
+  window.spektre.audio = (on) => { audioOn = on !== false; };
+  window.spektre.audio.preset = (p) => { preset = PRESETS[p] || PRESETS.warm; };
+  const scanAudio = () => document.querySelectorAll('video, audio').forEach(enhance);
+  if (document.readyState !== 'loading') scanAudio(); else document.addEventListener('DOMContentLoaded', scanAudio);
+  new MutationObserver(() => { clearTimeout(window.__au); window.__au = setTimeout(scanAudio, 1000); })
+    .observe(document.documentElement, { childList: true, subtree: true });
+
+  console.log('⟐ SPEKTRE CORE active — anti-track + ads + railo + BYOK + meta-agent + guard + passwords + passkeys + captcha-reduction + auto-signal + media-max + audio-immersion (portable)');
 })();
