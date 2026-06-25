@@ -67,7 +67,11 @@
   // REAL click-blockers — removing the dialog while leaving these = page eats every click (the MTV bug).
   const CMP_BACKDROPS = [
     '.onetrust-pc-dark-filter', '#onetrust-pc-sdk', '#onetrust-consent-sdk',   // OneTrust
-    '.sp_veil', '.sp_choice_type_11', '#sp_message_container', '.message-overlay', // Sourcepoint
+    // Sourcepoint renders a full-viewport fixed container whose id is SUFFIXED with a numeric message id
+    // (e.g. #sp_message_container_1388007) and the accept button lives in a CROSS-ORIGIN child iframe the top
+    // document can't click. Match by PREFIX (the bare '#sp_message_container' never matched the suffix → MTV/
+    // Iltalehti/Guardian stayed locked). Remove the whole container + unlock html.sp-message-open.
+    '.sp_veil', '.sp_choice_type_11', '[id^="sp_message_container"]', '.message-overlay', // Sourcepoint
     '.fc-dialog-overlay', '.fc-consent-root', '.qc-cmp2-container', '.qc-cmp-cleanslate' // Funding Choices / Quantcast
   ];
   const visible = (el) => !!el && el.offsetParent !== null && el.getClientRects().length > 0
@@ -103,11 +107,14 @@
     if (clicked) return;   // satisfied the wall the right way; let the CMP tear down its own overlay
     // 2) No accept button present → if a CMP backdrop is actively trapping clicks, dismantle it SAFELY.
     let blocked = false;
-    const c = document.elementFromPoint((window.innerWidth / 2) | 0, (window.innerHeight / 2) | 0);
-    if (c && isViewportBlocker(c)) {
+    // elementFromPoint at center may return a STATIC child (e.g. Sourcepoint's iframe inside a fixed container) —
+    // walk up to the nearest viewport-blocking ancestor with a CMP identity so we catch the real pointer-trap.
+    let c = document.elementFromPoint((window.innerWidth / 2) | 0, (window.innerHeight / 2) | 0);
+    for (let hop = 0; c && hop < 6; hop++, c = c.parentElement) {
       const cls = (c.className && c.className.toString) ? c.className.toString() : '';
       const id = c.id || '';
-      if (/onetrust|sp_|sourcepoint|consent|cmp|qc-cmp|fc-|cookie|backdrop|overlay|veil|dark-filter/i.test(cls + ' ' + id)) blocked = true;
+      if (/onetrust|sp_message|sp_veil|sourcepoint|consent|cmp|qc-cmp|fc-|cookie|backdrop|overlay|veil|dark-filter/i.test(cls + ' ' + id)
+          && isViewportBlocker(c)) { blocked = true; break; }
     }
     CMP_BACKDROPS.forEach(s => { try { document.querySelectorAll(s).forEach(e => { if (visible(e) || isViewportBlocker(e)) { blocked = true; e.remove(); } }); } catch (e) {} });
     if (blocked) {
