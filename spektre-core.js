@@ -456,7 +456,8 @@
   // page text → ONLY the native agent bridge; the LLM key/token lives in the Enclave, NEVER in page JS (audit
   // §3/§4) → no backdoor/scam worry. Result cached, page never altered. Content pages only (privacy+cost),
   // debounced; off via window.spektre.autoSignal(false); native may gate cost for the hosted tier.
-  let autoOn = true;
+  let autoOn = false;   // OFF by default — the agent NEVER fires on its own (no unprompted Keychain/agent hit,
+                        // no prompt-jam on login pages like WhatsApp Web). User opts in: window.spektre.autoSignal(true) or ⌘I.
   window.spektre.autoSignal = (on) => { autoOn = !!on; };
   window.spektre._signal = null;
   const looksLikeContent = () => {
